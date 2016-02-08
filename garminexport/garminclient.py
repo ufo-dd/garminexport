@@ -8,13 +8,19 @@ import logging
 import os
 import re
 import requests
-from StringIO import StringIO
+from io import BytesIO
 import sys
 import zipfile
 import dateutil
 import dateutil.parser
 import os.path
 from functools import wraps
+
+if sys.version_info[0] < 3:
+	string_types = basestring,
+	range = xrange
+else:
+	string_types = str,
 
 #
 # Note: For more detailed information about the API services
@@ -152,7 +158,7 @@ class GarminClient(object):
 			return
 			
 		raise Exception(
-			u"failed to validate authentication ticket: {}:\n{}".format(
+			"failed to validate authentication ticket: {}:\n{}".format(
 				response.status_code, response.text))
 		
 		
@@ -168,7 +174,8 @@ class GarminClient(object):
 		batch_size = 100
 		# fetch in batches since the API doesn't allow more than a certain
 		# number of activities to be retrieved on every invocation
-		for start_index in xrange(0, sys.maxint, batch_size):
+		MAX_INDEX = 2**31
+		for start_index in range(0, MAX_INDEX, batch_size):
 			next_batch = self._fetch_activity_ids_and_ts(start_index, batch_size)
 			if not next_batch:
 				break
@@ -197,7 +204,7 @@ class GarminClient(object):
 			"https://connect.garmin.com/proxy/activity-search-service-1.2/json/activities", params={"start": start_index, "limit": max_limit})
 		if response.status_code != 200:
 			raise Exception(
-				u"failed to fetch activities {} to {} types: {}\n{}".format(
+				"failed to fetch activities {} to {} types: {}\n{}".format(
 					start_index, (start_index+max_limit-1),
 					response.status_code, response.text))
 		results = json.loads(response.text)["results"]
@@ -225,7 +232,7 @@ class GarminClient(object):
 		"""
 		response = self.session.get("https://connect.garmin.com/proxy/activity-service-1.3/json/activity/{}".format(activity_id))
 		if response.status_code != 200:
-			raise Exception(u"failed to fetch activity {}: {}\n{}".format(
+			raise Exception("failed to fetch activity {}: {}\n{}".format(
 				activity_id, response.status_code, response.text))
 		return json.loads(response.text)
 
@@ -243,7 +250,7 @@ class GarminClient(object):
 		# mounted at xml or json depending on result encoding
 		response = self.session.get("https://connect.garmin.com/proxy/activity-service-1.3/json/activityDetails/{}".format(activity_id))
 		if response.status_code != 200:
-			raise Exception(u"failed to fetch activity details for {}: {}\n{}".format(
+			raise Exception("failed to fetch activity details for {}: {}\n{}".format(
 				activity_id, response.status_code, response.text))        
 		return json.loads(response.text)
 
@@ -268,7 +275,7 @@ class GarminClient(object):
 		if response.status_code == 404:
 			return None
 		if response.status_code != 200:
-			raise Exception(u"failed to fetch GPX for activity {}: {}\n{}".format(
+			raise Exception("failed to fetch GPX for activity {}: {}\n{}".format(
 				activity_id, response.status_code, response.text))        
 		return response.text
 
@@ -292,7 +299,7 @@ class GarminClient(object):
 		if response.status_code == 404:
 			return None
 		if response.status_code != 200:
-			raise Exception(u"failed to fetch TCX for activity {}: {}\n{}".format(
+			raise Exception("failed to fetch TCX for activity {}: {}\n{}".format(
 				activity_id, response.status_code, response.text))        
 		return response.text
 
@@ -315,13 +322,13 @@ class GarminClient(object):
 			return (None,None)
 		if response.status_code != 200:
 			raise Exception(
-				u"failed to get original activity file {}: {}\n{}".format(
+				"failed to get original activity file {}: {}\n{}".format(
 				activity_id, response.status_code, response.text))
 
 		# return the first entry from the zip archive where the filename is
 		# activity_id (should be the only entry!)
 		if unzipped:
-			zip = zipfile.ZipFile(StringIO(response.content), mode="r")
+			zip = zipfile.ZipFile(BytesIO(response.content), mode="r")
 			for path in zip.namelist():
 				fn, ext = os.path.splitext(path)
 				if fn==str(activity_id):
@@ -374,7 +381,7 @@ class GarminClient(object):
 		:rtype: int
 		"""
 
-		if isinstance(file, basestring):
+		if isinstance(file, string_types):
 			file = open(file, "rb")
 
 		# guess file type if unspecified
@@ -384,7 +391,7 @@ class GarminClient(object):
 			if ext.lower() in ('.gpx','.tcx','.fit'):
 				format = ext.lower()[1:]
 			else:
-				raise Exception(u"could not guess file type for {}".format(fn))
+				raise Exception("could not guess file type for {}".format(fn))
 
 		# upload it
 		files = dict(data=(fn, file))
@@ -393,12 +400,12 @@ class GarminClient(object):
 
 		# check response and get activity ID
 		if response.status_code != 200:
-			raise Exception(u"failed to upload {} for activity: {}\n{}".format(
+			raise Exception("failed to upload {} for activity: {}\n{}".format(
 				format, response.status_code, response.text))
 
 		j = response.json()
 		if len(j["detailedImportResult"]["failures"]) or len(j["detailedImportResult"]["successes"])!=1:
-			raise Exception(u"failed to upload {} for activity")
+			raise Exception("failed to upload {} for activity")
 		activity_id = j["detailedImportResult"]["successes"][0]["internalId"]
 
 		# add optional fields
@@ -411,12 +418,12 @@ class GarminClient(object):
 				response = self.session.post("https://connect.garmin.com/proxy/activity-service-1.2/json/{}/{}".format(endpoint, activity_id),
 											 data={'value':value})
 				if response.status_code != 200:
-					raise Exception(u"failed to set {} for activity {}: {}\n{}".format(
+					raise Exception("failed to set {} for activity {}: {}\n{}".format(
 						endpoint, activity_id, response.status_code, response.text))
 
 				j = response.json()
 				p0, p1 = path
 				if p0 not in j or j[p0][p1] != value:
-					raise Exception(u"failed to set {} for activity {}\n".format(endpoint, activity_id))
+					raise Exception("failed to set {} for activity {}\n".format(endpoint, activity_id))
 
 		return activity_id
